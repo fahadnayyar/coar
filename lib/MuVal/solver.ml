@@ -19,7 +19,7 @@ module Make (Cfg: Config.ConfigType) = struct
     Ok (module (PCSPSolver.Solver.Make (struct let config = cfg end)) : PCSPSolver.Solver.SolverType)
 
 
-  let fenv = Set.Poly.empty (*TODO: generate fenv*)
+let fenv = Set.Poly.empty (*TODO: generate fenv*)
 
   let preprocess muclp =
     muclp
@@ -220,7 +220,7 @@ module Make (Cfg: Config.ConfigType) = struct
         let bounds, phi, _ = if LogicOld.Formula.is_exists entry then LogicOld.Formula.let_exists entry else LogicOld.SortEnv.empty, entry, LogicOld.Dummy in
         let atm, _ = LogicOld.Formula.let_atom phi in
         let _, sorts, args, _ = LogicOld.Atom.let_pvar_app atm in
-        let senv = Logic.SortMap.of_old_sort_env Logic.ExtTerm.of_old_sort bounds in
+        let senv = Map.Poly.of_alist_exn @@ Logic.SortEnv.of_old_sort_env Logic.ExtTerm.of_old_sort bounds in
         let pre = LogicOld.Formula.mk_atom @@ LogicOld.Atom.mk_pvar_app (Ident.Pvar "PreNonTerm") sorts args in
         (senv, pre), MuCLP.Problem.MuCLP (funcs, LogicOld.Formula.forall bounds @@ LogicOld.Formula.mk_imply pre phi)
       in
@@ -233,11 +233,33 @@ module Make (Cfg: Config.ConfigType) = struct
       Debug.print @@ lazy (Printf.sprintf "pfwCSP for Non-termination:\n%s\n" @@ PCSP.Problem.str_of pcsp_nonterm);
       Deferred.return pcsp_solver >>=? fun pcsp_solver ->
       let (module PCSPSolver) = pcsp_solver in
-      Out_channel.output_string Out_channel.stdout "timeout in sec: ";
+      (* Out_channel.output_string Out_channel.stdout "timeout in sec: "; *)
       Out_channel.flush Out_channel.stdout;
       let timeout = try Some (int_of_string @@ In_channel.input_line_exn In_channel.stdin) with _ -> None in
+      let set_unknown = 
+        (* Out_channel.output_string Out_channel.stdout "Set unknown: "; *)
+        Out_channel.flush Out_channel.stdout;
+        match MuCLP.Parser.formula_from_string @@ In_channel.input_line_exn In_channel.stdin with
+          | Ok phi -> phi;
+          | Error msg -> failwith (Error.to_string_hum msg) 
+      in
+      let set_nonterm = 
+        (* Out_channel.output_string Out_channel.stdout "Set nonterm: "; *)
+        Out_channel.flush Out_channel.stdout;
+        match MuCLP.Parser.formula_from_string @@ In_channel.input_line_exn In_channel.stdin with
+          | Ok phi -> phi;
+          | Error msg -> failwith (Error.to_string_hum msg) 
+      in
+      let set_term = 
+        (* Out_channel.output_string Out_channel.stdout "Set term: "; *)
+        Out_channel.flush Out_channel.stdout;
+        match MuCLP.Parser.formula_from_string @@ In_channel.input_line_exn In_channel.stdin with
+          | Ok phi -> phi;
+          | Error msg -> failwith (Error.to_string_hum msg) 
+      in
+      (* let set_term  = LogicOld.Formula.mk_false () in *)
       let rec refine term nonterm unknown pos neg =
-        Out_channel.output_string Out_channel.stdout "action (term/nonterm/unknown/pos/neg/end): ";
+        (* Out_channel.output_string Out_channel.stdout "action (term/nonterm/unknown/pos/neg/end): "; *)
         Out_channel.flush Out_channel.stdout;
         match In_channel.input_line_exn In_channel.stdin with 
         | "term" ->
@@ -264,20 +286,22 @@ module Make (Cfg: Config.ConfigType) = struct
                     (Logic.Term.subst sol @@ Logic.ExtTerm.of_old_formula @@ snd pre_term) [] in
                 let term = Z3Smt.Z3interface.simplify fenv @@ Evaluator.simplify @@ LogicOld.Formula.or_of [phi; term] in
                 let unknown = Z3Smt.Z3interface.simplify fenv @@ Evaluator.simplify @@ LogicOld.Formula.and_of [LogicOld.Formula.mk_neg phi; unknown] in
-                Out_channel.print_endline @@ LogicOld.Formula.str_of @@ term;
+                (* Out_channel.print_endline @@ LogicOld.Formula.str_of @@ term; *)
                 if Z3Smt.Z3interface.is_sat fenv unknown then
                   refine term nonterm unknown (LogicOld.Formula.mk_false ()) (LogicOld.Formula.mk_false ())
                 else begin
-                  Out_channel.print_endline "maximality is guaranteed";
-                  Deferred.Or_error.return (Unknown, -1)(*Dummy*)
+                  (* Out_channel.print_endline "maximality is guaranteed"; *)
+                  refine term nonterm unknown (LogicOld.Formula.mk_false ()) (LogicOld.Formula.mk_false ())
+                  (* Deferred.Or_error.return (Unknown, -1)Dummy *)
                 end
               | Unsat, _ ->
                 if LogicOld.Formula.is_false pos && LogicOld.Formula.is_false neg then begin
-                  Out_channel.print_endline "maximally weak precondition for non-termination:";
-                  Out_channel.print_endline @@ LogicOld.Formula.str_of @@ unknown;
-                  Deferred.Or_error.return (Unknown, -1)(*Dummy*)
+                  (* Out_channel.print_endline "maximally weak precondition for non-termination:"; *)
+                  (* Out_channel.print_endline @@ LogicOld.Formula.str_of @@ unknown; *)
+                  refine term nonterm unknown (LogicOld.Formula.mk_false ()) (LogicOld.Formula.mk_false ())
+                  (* Deferred.Or_error.return (Unknown, -1)Dummy *)
                 end else begin
-                  Out_channel.print_endline "the specified constraints for positive and negative examples are incorrect";
+                  (* Out_channel.print_endline "the specified constraints for positive and negative examples are incorrect"; *)
                   refine term nonterm unknown (LogicOld.Formula.mk_false ()) (LogicOld.Formula.mk_false ())
                 end
               | Unknown, _ -> refine term nonterm unknown (LogicOld.Formula.mk_false ()) (LogicOld.Formula.mk_false ()))
@@ -305,40 +329,47 @@ module Make (Cfg: Config.ConfigType) = struct
                     (Logic.Term.subst sol @@ Logic.ExtTerm.of_old_formula @@ snd pre_nonterm) [] in
                 let nonterm = Z3Smt.Z3interface.simplify fenv @@ Evaluator.simplify @@ LogicOld.Formula.or_of [phi; nonterm] in
                 let unknown = Z3Smt.Z3interface.simplify fenv @@ Evaluator.simplify @@ LogicOld.Formula.and_of [LogicOld.Formula.mk_neg phi; unknown] in
-                Out_channel.print_endline @@ LogicOld.Formula.str_of @@ nonterm;
+                (* Out_channel.print_endline @@ LogicOld.Formula.str_of @@ nonterm; *)
                 if Z3Smt.Z3interface.is_sat fenv unknown then
                   refine term nonterm unknown (LogicOld.Formula.mk_false ()) (LogicOld.Formula.mk_false ())
                 else begin
-                  Out_channel.print_endline "maximality is guaranteed";
-                  Deferred.Or_error.return (Unknown, -1)(*Dummy*)
+                  (* Out_channel.print_endline "maximality is guaranteed"; *)
+                  refine term nonterm unknown (LogicOld.Formula.mk_false ()) (LogicOld.Formula.mk_false ())
+                  (* Deferred.Or_error.return (Unknown, -1)Dummy *)
                 end
               | Unsat, _ ->
                 if LogicOld.Formula.is_false pos && LogicOld.Formula.is_false neg then begin
-                  Out_channel.print_endline "maximally weak precondition for termination:";
-                  Out_channel.print_endline @@ LogicOld.Formula.str_of @@ unknown;
-                  Deferred.Or_error.return (Unknown, -1)(*Dummy*)
+                  (* Out_channel.print_endline "maximally weak precondition for termination:"; *)
+                  (* Out_channel.print_endline @@ LogicOld.Formula.str_of @@ unknown; *)
+                  refine term nonterm unknown (LogicOld.Formula.mk_false ()) (LogicOld.Formula.mk_false ())
+                  (* Deferred.Or_error.return (Unknown, -1)Dummy *)
                 end else begin
-                  Out_channel.print_endline "the specified constraints for positive and negative examples are incorrect";
+                  (* Out_channel.print_endline "the specified constraints for positive and negative examples are incorrect"; *)
                   refine term nonterm unknown (LogicOld.Formula.mk_false ()) (LogicOld.Formula.mk_false ())
                 end
               | Unknown, _ -> refine term nonterm unknown (LogicOld.Formula.mk_false ()) (LogicOld.Formula.mk_false ()))
         | "pos" ->
-          Out_channel.output_string Out_channel.stdout "positive examples: ";
+          (* Out_channel.output_string Out_channel.stdout "positive examples: "; *)
           Out_channel.flush Out_channel.stdout;
           (match MuCLP.Parser.formula_from_string @@ In_channel.input_line_exn In_channel.stdin with
            | Ok phi -> refine term nonterm unknown (LogicOld.Formula.mk_or pos phi) neg
            | Error msg -> failwith (Error.to_string_hum msg))
         | "neg" ->
-          Out_channel.output_string Out_channel.stdout "negative examples: ";
+          (* Out_channel.output_string Out_channel.stdout "negative examples: "; *)
           Out_channel.flush Out_channel.stdout;
           (match MuCLP.Parser.formula_from_string @@ In_channel.input_line_exn In_channel.stdin with
            | Ok phi -> refine term nonterm unknown pos (LogicOld.Formula.mk_or neg phi)
            | Error msg -> failwith (Error.to_string_hum msg))
         | "unknown" ->
+        (* Out_channel.print_endline @@ LogicOld.Formula.str_of @@ unknown; *)
+          refine term nonterm unknown pos neg
+        | "print" ->  
           Out_channel.print_endline @@ LogicOld.Formula.str_of @@ unknown;
+          Out_channel.print_endline @@ LogicOld.Formula.str_of @@ nonterm; 
+          Out_channel.print_endline @@ LogicOld.Formula.str_of @@ term;
           refine term nonterm unknown pos neg
         | "end" -> Deferred.Or_error.return (Unknown, -1)(*Dummy*)
         | _ -> refine term nonterm unknown pos neg
       in
-      refine (LogicOld.Formula.mk_false ()) (LogicOld.Formula.mk_false ()) (LogicOld.Formula.mk_true ()) (LogicOld.Formula.mk_false ()) (LogicOld.Formula.mk_false ())
+      refine set_term set_nonterm set_unknown (LogicOld.Formula.mk_false ()) (LogicOld.Formula.mk_false ())
 end
